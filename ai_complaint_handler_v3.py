@@ -3,7 +3,8 @@ import pandas as pd
 import json
 import os
 from io import BytesIO
-from ai_analyzer import analyze_complaint  # Import the helper function
+from ai_analyzer import analyze_complaint
+from telegram_notifier import send_telegram_message  # 导入通知函数
 
 # --- Configuration ---
 st.set_page_config(page_title="AI Complaint Handler", page_icon="🤖", layout="wide")
@@ -53,7 +54,12 @@ with st.sidebar:
     st.markdown("- Template Center")
     
     st.divider()
-    st.markdown("📊 Status: **Online v3.0**")
+    st.markdown("📊 Status: **Online v3.1**")
+    
+    # 侧边栏的联系我们按钮
+    st.divider()
+    if st.button("📩 Contact Us / Enterprise", use_container_width=True, type="primary"):
+        st.session_state.show_contact_modal = True
 
 # --- Main Interface ---
 st.title("🤖 AI Complaint Handler System")
@@ -65,12 +71,72 @@ if "analysis_result" not in st.session_state:
 if "current_template_name" not in st.session_state:
     st.session_state.current_template_name = "Default Template"
 if "template_config" not in st.session_state:
-    # Default configuration
     st.session_state.template_config = {
         "dimensions": ["Sentiment Analysis", "Problem Classification", "Urgency", "Handling Suggestion"],
         "tone": "Professional and Empathetic",
         "language": "English"
     }
+if "show_contact_modal" not in st.session_state:
+    st.session_state.show_contact_modal = False
+
+# --- Contact Us Modal Logic ---
+# 使用 Streamlit 的 dialog (需要较新版本) 或者 st.form 模拟
+# 这里使用 st.form 在底部或侧边栏展示，或者用 session_state 控制显示
+if st.session_state.show_contact_modal:
+    st.markdown("### 📩 Contact Us / Request Enterprise Access")
+    st.markdown("Fill out the form below and we'll get back to you within 24 hours.")
+    
+    with st.form("contact_form"):
+        col_name, col_company = st.columns(2)
+        with col_name:
+            name = st.text_input("Name *", placeholder="Your Name")
+        with col_company:
+            company = st.text_input("Company", placeholder="Your Company")
+        
+        contact_method = st.selectbox("Preferred Contact Method", ["Email", "Telegram", "Phone"])
+        contact_value = st.text_input(f"Your {contact_method} *", placeholder=f"Enter your {contact_method}")
+        
+        demand = st.selectbox("Demand", [
+            "Enterprise License Inquiry",
+            "API Integration",
+            "Custom Solution",
+            "Technical Support",
+            "Other"
+        ])
+        
+        message = st.text_area("Message (Optional)", placeholder="Tell us more about your needs...")
+        
+        submitted = st.form_submit_button("🚀 Send Request", type="primary")
+        
+        if submitted:
+            if not name or not contact_value:
+                st.error("Please fill in Name and Contact Info.")
+            else:
+                # 构建通知消息
+                notification = f"""
+🔔 <b>New Business Lead!</b>
+
+👤 <b>Name:</b> {name}
+🏢 <b>Company:</b> {company or "N/A"}
+📞 <b>Contact ({contact_method}):</b> {contact_value}
+🎯 <b>Demand:</b> {demand}
+💬 <b>Message:</b> {message if message else "None"}
+
+<i>Source: AI Complaint Handler Web</i>
+                """
+                # 发送 Telegram
+                success, msg = send_telegram_message(notification)
+                if success:
+                    st.success("✅ Request sent successfully! We'll contact you soon.")
+                    st.session_state.show_contact_modal = False # 隐藏表单
+                    st.rerun()
+                else:
+                    st.error(f"❌ Failed to send: {msg}. Please email us directly.")
+    
+    st.divider()
+    if st.button("Close Form"):
+        st.session_state.show_contact_modal = False
+        st.rerun()
 
 # Create three main tabs
 tab_single, tab_batch, tab_templates = st.tabs(["📝 Single Analysis", "📊 Batch Processing", "📂 Template Center"])
@@ -101,7 +167,6 @@ with tab_single:
         else:
             with st.spinner("AI is analyzing deeply, please wait..."):
                 try:
-                    # Call backend analysis logic
                     result = analyze_complaint(input_text, st.session_state.template_config)
                     st.session_state.analysis_result = result
                     st.success("Analysis complete!")
@@ -109,7 +174,6 @@ with tab_single:
                     st.error(f"Error during analysis: {e}")
                     st.session_state.analysis_result = None
 
-    # Display Results
     if st.session_state.analysis_result:
         st.divider()
         st.subheader("📊 Analysis Results")
@@ -140,12 +204,10 @@ with tab_batch:
     
     if uploaded_file is not None:
         try:
-            # Read Excel
             df_input = pd.read_excel(uploaded_file)
             st.write("✅ File read successfully! Preview (first 5 rows):")
             st.dataframe(df_input.head())
             
-            # Select column
             columns = df_input.columns.tolist()
             text_col = st.selectbox("Select the column containing complaint text:", columns)
             
@@ -164,31 +226,25 @@ with tab_batch:
                         status_text.text(f"Analyzing {i+1}/{total_rows}...")
                         
                         try:
-                            # Call analysis interface
                             res = analyze_complaint(text, st.session_state.template_config)
-                            # Merge results
                             row_result = row.to_dict()
                             row_result["AI_Sentiment"] = res.get("sentiment", "")
                             row_result["AI_Category"] = res.get("category", "")
                             row_result["AI_Urgency"] = res.get("urgency", "")
-                            row_result["AI_Summary"] = str(res.get("analysis_detail", ""))[:100] + "..." # Truncate
+                            row_result["AI_Summary"] = str(res.get("analysis_detail", ""))[:100] + "..."
                             row_result["AI_Suggestion"] = res.get("suggestion", "")
                             results.append(row_result)
                         except Exception as e:
-                            # Mark error
                             row_result = row.to_dict()
                             row_result["AI_Error"] = str(e)
                             results.append(row_result)
                         
                         progress_bar.progress((i + 1) / total_rows)
                     
-                    # Generate result DataFrame
                     df_result = pd.DataFrame(results)
-                    
                     st.success("Batch analysis complete!")
                     st.dataframe(df_result.head())
                     
-                    # Provide download
                     output_buffer = BytesIO()
                     with pd.ExcelWriter(output_buffer, engine='openpyxl') as writer:
                         df_result.to_excel(writer, index=False, sheet_name='Analysis Results')
@@ -211,7 +267,6 @@ with tab_templates:
     st.header("📂 Template Management Center")
     st.markdown("Save and load different analysis configurations for various business scenarios.")
     
-    # 1. Save current config as template
     st.subheader("💾 Save Current Configuration")
     new_template_name = st.text_input("Template Name", placeholder="e.g., E-commerce Specialized")
     if st.button("Save as New Template"):
@@ -226,7 +281,6 @@ with tab_templates:
     
     st.divider()
     
-    # 2. Load/Delete existing templates
     st.subheader("📑 Existing Templates")
     templates = load_templates()
     
@@ -250,4 +304,12 @@ with tab_templates:
                             st.rerun()
     
     st.divider()
-    st.info("💡 Note: Templates are saved in the current deployment directory. In Streamlit Cloud, files may be lost after restart. Screenshot or export important configurations.")
+    st.info("💡 Note: Templates are saved in the current deployment directory. In Streamlit Cloud, files may be lost after restart.")
+
+# Footer
+st.divider()
+st.markdown("""
+<div style='text-align: center; color: gray; font-size: 0.8em;'>
+Powered by AI Complaint Handler v3.1 | © 2026 Yupeng AI
+</div>
+""", unsafe_allow_html=True)
