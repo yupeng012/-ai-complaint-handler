@@ -3,7 +3,7 @@ import pandas as pd
 import json
 import os
 from io import BytesIO
-from ai_analyzer import analyze_complaint, ComplaintAnalysis  # 假设 ai_analyzer.py 中有这些接口
+from ai_analyzer import analyze_complaint  # 导入全局辅助函数
 
 # --- 配置 ---
 st.set_page_config(page_title="AI 投诉处理专家", page_icon="🤖", layout="wide")
