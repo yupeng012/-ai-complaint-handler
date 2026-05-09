@@ -1,7 +1,0 @@
-# Core dependencies - No version pinning for max compatibility
-streamlit
-pandas
-numpy
-openpyxl
-requests
-Pillow
