@@ -1,195 +1,258 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-🤖 AI 投诉处理助手 v3.0 (旗舰版)
-功能全景:
-1. ✅ MiniMax AI 智能分析
-2. ✅ 自定义模板管理
-3. ✅ 批量导入处理 (CSV/Excel)
-4. ✅ 历史记录与导出
-5. ✅ 增强的 UI/UX
-
-技术栈：Streamlit + MiniMax AI + Pandas
-定位：一站式智能客服投诉处理平台
-"""
-
 import streamlit as st
+import pandas as pd
 import json
-from pathlib import Path
-from datetime import datetime
-import sys
+import os
+from io import BytesIO
+from ai_analyzer import analyze_complaint, ComplaintAnalysis  # 假设 ai_analyzer.py 中有这些接口
 
-# 导入自定义模块
-sys.path.insert(0, str(Path(__file__).parent))
-from ai_analyzer import AIComplaintAnalyzer
+# --- 配置 ---
+st.set_page_config(page_title="AI 投诉处理专家", page_icon="🤖", layout="wide")
+TEMPLATE_FILE = "templates.json"
 
-# 页面配置
-st.set_page_config(
-    page_title="AI 投诉处理助手 v3.0",
-    page_icon="🚀",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+# --- 辅助函数：模板管理 ---
+def load_templates():
+    if os.path.exists(TEMPLATE_FILE):
+        try:
+            with open(TEMPLATE_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except:
+            return {}
+    return {}
 
-# 自定义 CSS
-st.markdown("""
-<style>
-    .main { background-color: #f9fafb; }
-    .stButton>button {
-        background-color: #4F46E5;
-        color: white;
-        border-radius: 8px;
-        font-weight: bold;
-    }
-    .metric-card {
-        background: white;
-        padding: 20px;
-        border-radius: 10px;
-        box-shadow: 0 2px 5px rgba(0,0,0,0.05);
-        text-align: center;
-    }
-</style>
-""", unsafe_allow_html=True)
+def save_template(name, config):
+    templates = load_templates()
+    templates[name] = config
+    try:
+        with open(TEMPLATE_FILE, "w", encoding="utf-8") as f:
+            json.dump(templates, f, ensure_ascii=False, indent=2)
+        return True
+    except Exception as e:
+        st.error(f"保存模板失败：{e}")
+        return False
+
+def delete_template(name):
+    templates = load_templates()
+    if name in templates:
+        del templates[name]
+        try:
+            with open(TEMPLATE_FILE, "w", encoding="utf-8") as f:
+                json.dump(templates, f, ensure_ascii=False, indent=2)
+            return True
+        except Exception as e:
+            st.error(f"删除模板失败：{e}")
+            return False
+    return False
+
+# --- 侧边栏 ---
+with st.sidebar:
+    st.title("🤖 AI 投诉处理专家")
+    st.markdown("**功能列表:**")
+    st.markdown("- 单条/批量分析")
+    st.markdown("- 智能情绪识别")
+    st.markdown("- 自动分类与建议")
+    st.markdown("- 模板中心")
+    
+    st.divider()
+    st.markdown("📊 当前状态：已上线 v3.0")
+
+# --- 主界面 ---
+st.title("🤖 AI 投诉处理专家系统")
+st.markdown("基于人工智能的自动化投诉分析平台，支持单条精析与批量处理。")
 
 # 初始化 Session State
-for key in ['history', 'show_history', 'show_templates', 'show_batch', 'current_analysis', 'current_responses']:
-    if key not in st.session_state:
-        st.session_state[key] = [] if key == 'history' else False
-
-# 数据持久化
-HISTORY_FILE = Path.home() / ".hermes" / "complaint_history_v3.json"
-
-def save_history():
-    HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
-    with open(HISTORY_FILE, 'w', encoding='utf-8') as f:
-        json.dump(st.session_state.history, f, ensure_ascii=False, indent=2)
-
-def load_history():
-    if HISTORY_FILE.exists():
-        with open(HISTORY_FILE, 'r', encoding='utf-8') as f:
-            st.session_state.history = json.load(f)
-
-load_history()
-
-# 侧边栏导航
-with st.sidebar:
-    st.title("🧭 导航菜单")
-    
-    menu_options = {
-        "🏠 首页单条处理": "home",
-        "📋 模板管理": "templates",
-        "📦 批量处理": "batch",
-        "📜 历史记录": "history",
-        "ℹ️ 关于": "about"
+if "analysis_result" not in st.session_state:
+    st.session_state.analysis_result = None
+if "current_template_name" not in st.session_state:
+    st.session_state.current_template_name = "默认模板"
+if "template_config" not in st.session_state:
+    # 默认配置
+    st.session_state.template_config = {
+        "dimensions": ["情绪分析", "问题分类", "紧急程度", "处理建议"],
+        "tone": "专业且富有同理心",
+        "language": "中文"
     }
-    
-    selected = st.radio("选择功能模块:", list(menu_options.keys()), index=0)
-    current_page = menu_options[selected]
-    
-    st.markdown("---")
-    st.markdown("**💡 提示**:")
-    st.markdown("- 单条处理适合日常少量投诉")
-    st.markdown("- 批量处理适合集中处理积压")
-    st.markdown("- 模板管理可配置公司专属话术")
 
-# 主内容区域
-if current_page == "home":
-    st.title("🏠 AI 投诉处理助手 v3.0")
-    st.markdown("### *智能 · 高效 · 专业*")
+# 创建三个主要标签页
+tab_single, tab_batch, tab_templates = st.tabs(["📝 单条分析", "📊 批量处理", "📂 模板中心"])
+
+# ==========================================
+# 标签页 1: 单条分析
+# ==========================================
+with tab_single:
+    st.header("单条投诉分析")
     
-    # 输入区
-    st.subheader("📝 输入投诉内容")
-    complaint_text = st.text_area(
-        "请粘贴客户投诉内容:",
-        height=200,
-        placeholder="例如：我于 2026-05-01 购买的订单#A12345678 商品，收到后发现严重质量问题！"
-    )
+    col1, col2 = st.columns([2, 1])
     
-    col1, col2 = st.columns([1, 4])
     with col1:
-        analyze_btn = st.button("🔍 开始分析", type="primary", use_container_width=True)
+        input_text = st.text_area("请输入投诉内容:", height=200, placeholder="例如：我购买的产品出现了质量问题，客服态度也很差...")
     
-    if analyze_btn and complaint_text:
-        with st.spinner("🤖 AI 正在分析中..."):
-            analyzer = AIComplaintAnalyzer(use_mock=True)  # 默认模拟
-            analysis = analyzer.analyze(complaint_text)
-            responses = analyzer.generate_responses(complaint_text, analysis)
-            
-            st.session_state.current_analysis = analysis
-            st.session_state.current_responses = responses
-            
-            # 保存历史
-            st.session_state.history.append({
-                'timestamp': datetime.now().isoformat(),
-                'complaint': complaint_text,
-                'analysis': analysis,
-                'responses': responses
-            })
-            save_history()
-            st.rerun()
-    
-    # 显示结果
-    if st.session_state.current_analysis:
-        analysis = st.session_state.current_analysis
-        responses = st.session_state.current_responses
+    with col2:
+        st.subheader("分析配置")
+        # 这里可以简化，直接使用当前激活的模板配置，或者允许微调
+        st.info(f"当前使用：**{st.session_state.current_template_name}**")
+        st.write("**分析维度:**")
+        for dim in st.session_state.template_config.get("dimensions", []):
+            st.checkbox(dim, value=True, disabled=True) # 仅展示
         
-        st.markdown("---")
+        analyze_btn = st.button("开始分析", type="primary", use_container_width=True)
+    
+    if analyze_btn:
+        if not input_text.strip():
+            st.warning("请输入投诉内容后再进行分析。")
+        else:
+            with st.spinner("AI 正在深度分析中，请稍候..."):
+                try:
+                    # 调用后端分析逻辑
+                    # 注意：这里假设 ai_analyzer.py 中的 analyze_complaint 函数接受文本和配置
+                    result = analyze_complaint(input_text, st.session_state.template_config)
+                    st.session_state.analysis_result = result
+                    st.success("分析完成！")
+                except Exception as e:
+                    st.error(f"分析过程中出错：{e}")
+                    st.session_state.analysis_result = None
+
+    # 展示结果
+    if st.session_state.analysis_result:
+        st.divider()
         st.subheader("📊 分析结果")
+        res = st.session_state.analysis_result
         
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("情绪", analysis.get('emotion_label', '未知'))
-        c2.metric("订单号", analysis.get('order_number', '未识别'))
-        c3.metric("问题类型", analysis.get('problem_type', '未知'))
-        c4.metric("紧急度", analysis.get('urgency', '未知'))
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            st.metric("情绪倾向", res.get("sentiment", "未知"))
+        with c2:
+            st.metric("问题分类", res.get("category", "未知"))
+        with c3:
+            st.metric("紧急程度", res.get("urgency", "普通"))
         
-        st.markdown("---")
-        st.subheader("📝 回复草稿")
+        st.markdown("### 💡 详细分析")
+        st.markdown(res.get("analysis_detail", "无详细分析内容"))
         
-        tab1, tab2, tab3 = st.tabs(["💝 共情型", "💼 专业型", "🎁 补偿型"])
-        with tab1:
-            st.text_area("回复内容", responses.get('empathy', ''), height=250)
-            if st.button("复制共情型"): st.success("✅ 已复制")
-        with tab2:
-            st.text_area("回复内容", responses.get('professional', ''), height=250)
-            if st.button("复制专业型"): st.success("✅ 已复制")
-        with tab3:
-            st.text_area("回复内容", responses.get('compensation', ''), height=250)
-            if st.button("复制补偿型"): st.success("✅ 已复制")
+        st.markdown("### 🚀 处理建议")
+        st.markdown(res.get("suggestion", "无具体建议"))
+        
+        # 下载报告 (可选，如果需要单条报告)
+        # st.download_button(...)
 
-elif current_page == "templates":
-    st.title("📋 模板管理")
-    st.info("此处集成 template_manager 模块")
-    # 实际部署时导入: from template_manager import render_template_manager; render_template_manager()
-    st.write("功能开发中...")
-
-elif current_page == "batch":
-    st.title("📦 批量处理")
-    st.info("此处集成 batch_processor 模块")
-    # 实际部署时导入: from batch_processor import render_batch_processor; render_batch_processor()
-    st.write("功能开发中...")
-
-elif current_page == "history":
-    st.title("📜 历史记录")
-    if st.button("🗑️ 清空历史"):
-        st.session_state.history = []
-        save_history()
-        st.rerun()
+# ==========================================
+# 标签页 2: 批量处理
+# ==========================================
+with tab_batch:
+    st.header("📊 Excel 批量处理")
+    st.markdown("上传包含投诉内容的 Excel 文件，一键生成分析报告。")
     
-    for i, item in enumerate(reversed(st.session_state.history)):
-        with st.expander(f"{item['timestamp'][:19]} - {item['analysis'].get('problem_type', '未知')}"):
-            st.write("**投诉内容:**")
-            st.write(item['complaint'][:200] + "...")
-            st.write("**分析结果:**")
-            st.json(item['analysis'])
+    uploaded_file = st.file_uploader("上传 Excel 文件 (.xlsx, .xls)", type=["xlsx", "xls"])
+    
+    if uploaded_file is not None:
+        try:
+            # 读取 Excel
+            df_input = pd.read_excel(uploaded_file)
+            st.write("✅ 文件读取成功！前 5 行预览：")
+            st.dataframe(df_input.head())
+            
+            # 选择列
+            columns = df_input.columns.tolist()
+            text_col = st.selectbox("请选择包含投诉文本的列名:", columns)
+            
+            if st.button("开始批量分析", type="primary"):
+                if not text_col:
+                    st.warning("请选择文本列。")
+                else:
+                    progress_bar = st.progress(0)
+                    status_text = st.empty()
+                    results = []
+                    
+                    total_rows = len(df_input)
+                    
+                    for i, row in df_input.iterrows():
+                        text = str(row[text_col])
+                        status_text.text(f"正在分析第 {i+1}/{total_rows} 条...")
+                        
+                        try:
+                            # 调用分析接口
+                            res = analyze_complaint(text, st.session_state.template_config)
+                            # 合并结果
+                            row_result = row.to_dict()
+                            row_result["AI_情绪"] = res.get("sentiment", "")
+                            row_result["AI_分类"] = res.get("category", "")
+                            row_result["AI_紧急度"] = res.get("urgency", "")
+                            row_result["AI_分析摘要"] = str(res.get("analysis_detail", ""))[:100] + "..." # 截断以防过长
+                            row_result["AI_处理建议"] = res.get("suggestion", "")
+                            results.append(row_result)
+                        except Exception as e:
+                            # 出错则标记
+                            row_result = row.to_dict()
+                            row_result["AI_错误"] = str(e)
+                            results.append(row_result)
+                        
+                        progress_bar.progress((i + 1) / total_rows)
+                    
+                    # 生成结果 DataFrame
+                    df_result = pd.DataFrame(results)
+                    
+                    st.success("批量分析完成！")
+                    st.dataframe(df_result.head())
+                    
+                    # 提供下载
+                    output_buffer = BytesIO()
+                    with pd.ExcelWriter(output_buffer, engine='openpyxl') as writer:
+                        df_result.to_excel(writer, index=False, sheet_name='分析结果')
+                    
+                    st.download_button(
+                        label="📥 下载分析结果 Excel",
+                        data=output_buffer.getvalue(),
+                        file_name="ai_complaint_analysis_result.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    )
+                    
+        except Exception as e:
+            st.error(f"处理文件时出错：{e}")
+            st.write("请确保上传的是标准的 Excel 文件。")
 
-elif current_page == "about":
-    st.title("ℹ️ 关于")
-    st.markdown("""
-    **AI 投诉处理助手 v3.0**
+# ==========================================
+# 标签页 3: 模板中心
+# ==========================================
+with tab_templates:
+    st.header("📂 模板管理中心")
+    st.markdown("保存和加载不同的分析配置，适应不同业务场景。")
     
-    一款面向中小企业的智能客服工具。
+    # 1. 保存当前配置为模板
+    st.subheader("💾 保存当前配置")
+    new_template_name = st.text_input("模板名称", placeholder="例如：电商专用模板")
+    if st.button("保存为新模板"):
+        if new_template_name:
+            if save_template(new_template_name, st.session_state.template_config):
+                st.success(f"模板 '{new_template_name}' 已保存！")
+                st.rerun()
+            else:
+                st.error("保存失败，请检查权限或磁盘空间。")
+        else:
+            st.warning("请输入模板名称。")
     
-    - **版本**: 3.0 (旗舰版)
-    - **开发时间**: 2026-05-09
-    - **技术支持**: MiniMax AI
-    """)
+    st.divider()
+    
+    # 2. 加载/删除已有模板
+    st.subheader("📑 已有模板列表")
+    templates = load_templates()
+    
+    if not templates:
+        st.info("暂无已保存的模板。")
+    else:
+        for name, config in templates.items():
+            with st.expander(f"📄 {name}"):
+                st.write(f"**配置:** {config}")
+                col_a, col_b = st.columns(2)
+                with col_a:
+                    if st.button(f"加载此模板", key=f"load_{name}"):
+                        st.session_state.current_template_name = name
+                        st.session_state.template_config = config
+                        st.success(f"已加载模板：{name}")
+                        st.rerun()
+                with col_b:
+                    if st.button(f"删除此模板", key=f"del_{name}"):
+                        if delete_template(name):
+                            st.success(f"模板 '{name}' 已删除")
+                            st.rerun()
+    
+    st.divider()
+    st.info("💡 提示：模板保存在当前部署目录下。在 Streamlit Cloud 中，文件可能在重启后丢失，建议重要配置截图保存或导出。")

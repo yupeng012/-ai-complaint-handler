@@ -334,6 +334,37 @@ class AIComplaintAnalyzer:
             'compensation': compensation
         }
 
+# --- 全局辅助函数 (供 Streamlit 调用) ---
+
+def analyze_complaint(text: str, config: Optional[Dict] = None) -> Dict:
+    """
+    全局辅助函数：分析投诉内容
+    供 Streamlit 应用直接调用，屏蔽底层类的实现细节
+    
+    Args:
+        text: 投诉文本
+        config: 可选的配置字典 (目前主要用作透传，未来可扩展)
+    
+    Returns:
+        分析结果字典 (包含 sentiment, category, urgency, analysis_detail, suggestion 等字段)
+    """
+    analyzer = AIComplaintAnalyzer(use_mock=False)  # 默认使用 AI，失败会自动降级
+    result = analyzer.analyze(text)
+    
+    # 标准化输出格式，匹配 Streamlit 中的字段名
+    # 注意：底层 AIComplaintAnalyzer.analyze() 返回的是 emotion, problem_type 等
+    # 这里做一个映射，使其更符合前端展示需求
+    
+    return {
+        "sentiment": result.get("emotion", "未知"),
+        "category": result.get("problem_type", "未知"),
+        "urgency": result.get("urgency", "普通"),
+        "analysis_detail": result.get("problem_summary", ""),
+        "suggestion": f"建议针对{result.get('problem_type', '问题')}进行{result.get('customer_demand', '处理')}",
+        "raw_result": result  # 保留原始结果以备调试
+    }
+
+
 # 测试
 if __name__ == "__main__":
     analyzer = AIComplaintAnalyzer(use_mock=True)
